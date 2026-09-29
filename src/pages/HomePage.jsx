@@ -1,25 +1,18 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
+import { loadHistory } from '../utils/storage'
 
 function HomePage() {
-  const [stats, setStats] = useState({ total: 0, today: 0 })
-  const [recentActivity, setRecentActivity] = useState([])
-
-  useEffect(() => {
-    // Load stats from localStorage
-    const history = JSON.parse(localStorage.getItem('triageHistory') || '[]')
+  const { stats, recentActivity } = useMemo(() => {
+    const history = loadHistory()
     const today = new Date().toDateString()
-    const todayCount = history.filter(item => 
-      new Date(item.timestamp).toDateString() === today
-    ).length
-
-    setStats({
-      total: history.length,
-      today: todayCount
-    })
-
-    // Get recent 3 items
-    setRecentActivity(history.slice(-3).reverse())
+    return {
+      stats: {
+        total: history.length,
+        today: history.filter(item => new Date(item.timestamp).toDateString() === today).length
+      },
+      recentActivity: history.slice(-3).reverse()
+    }
   }, [])
 
   return (
