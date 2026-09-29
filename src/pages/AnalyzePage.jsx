@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { categorizeMessage } from '../utils/llmHelper'
-import { calculateUrgency } from '../utils/urgencyScorer'
-import { getRecommendedAction } from '../utils/templates'
+import { analyzeMessage } from '../utils/llmHelper'
+import { getRecommendedAction, shouldEscalate } from '../utils/templates'
+import { addToHistory } from '../utils/storage'
 
 function AnalyzePage() {
   const [message, setMessage] = useState('')
   const [results, setResults] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     // Check for example message from home page
@@ -20,27 +22,27 @@ function AnalyzePage() {
 
   const handleAnalyze = async () => {
     if (!message.trim()) {
-      alert('Please enter a message to analyze')
+      setError('Please enter a message to analyze.')
       return
     }
 
     setIsLoading(true)
     setResults(null)
+    setError('')
+    setNotice('')
     
     try {
-      // Run categorization (LLM call)
-      const { category, reasoning } = await categorizeMessage(message)
-      
-      // Calculate urgency (rule-based)
-      const urgency = calculateUrgency(message)
+      // Categorize and rate urgency (single LLM call)
+      const { category, urgency, reasoning } = await analyzeMessage(message)
       
       // Get recommended action (template-based)
-      const recommendedAction = getRecommendedAction(category)
+      const recommendedAction = getRecommendedAction(category, urgency)
       
       const analysisResult = {
         message,
         category,
         urgency,
+        escalate: shouldEscalate(category, urgency),
         recommendedAction,
         reasoning,
         timestamp: new Date().toISOString()
@@ -49,12 +51,12 @@ function AnalyzePage() {
       setResults(analysisResult)
 
       // Save to history
-      const history = JSON.parse(localStorage.getItem('triageHistory') || '[]')
-      history.push(analysisResult)
-      localStorage.setItem('triageHistory', JSON.stringify(history))
+      if (!addToHistory(analysisResult)) {
+        setNotice('Analysis complete, but it could not be saved to history (browser storage unavailable).')
+      }
     } catch (error) {
       console.error('Error analyzing message:', error)
-      alert('Error analyzing message. Please try again.')
+      setError('AI analysis is unavailable right now. Check your Groq API key and connection, then try again.')
     } finally {
       setIsLoading(false)
     }
@@ -63,6 +65,8 @@ function AnalyzePage() {
   const handleClear = () => {
     setMessage('')
     setResults(null)
+    setError('')
+    setNotice('')
   }
 
   return (
@@ -124,6 +128,18 @@ function AnalyzePage() {
           </div>
         </div>
 
+        {error && (
+          <div role="alert" className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 mb-6">
+            {error}
+          </div>
+        )}
+
+        {notice && (
+          <div role="status" className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-lg p-4 mb-6">
+            {notice}
+          </div>
+        )}
+
         {/* Results Section */}
         {results && (
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -147,6 +163,12 @@ function AnalyzePage() {
                   {results.urgency}
                 </div>
               </div>
+
+              {results.escalate && (
+                <div role="alert" className="bg-red-50 border border-red-300 text-red-900 rounded-lg p-4 font-semibold">
+                  🚨 Escalate to a human immediately
+                </div>
+              )}
 
               <div>
                 <div className="text-sm font-semibold text-gray-600 mb-1">Recommended Action</div>
@@ -172,7 +194,8 @@ function AnalyzePage() {
                 onClick={() => {
                   const text = `Category: ${results.category}\nUrgency: ${results.urgency}\nRecommendation: ${results.recommendedAction}\n\nReasoning: ${results.reasoning}`
                   navigator.clipboard.writeText(text)
-                  alert('Results copied to clipboard!')
+                    .then(() => setNotice('Results copied to clipboard.'))
+                    .catch(() => setNotice('Could not copy to clipboard.'))
                 }}
                 className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 font-semibold"
               >
